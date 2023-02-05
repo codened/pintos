@@ -28,18 +28,31 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  //begin:added saveptr variable
+  char *fn_copy, *saveptr, *prog_name;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
+  fn_copy = malloc(sizeof(int));
+  prog_name = malloc(strlen(file_name)+1);
+  strlcpy (prog_name, file_name, PGSIZE);
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+  
+
+
+  //begin:our code
+  char *fn_executable= malloc(strlen(file_name)+1) ;
+  fn_executable= strtok_r(prog_name, " ", &saveptr);
+
+  //end:our code
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  //begin:changed the executable file name
+  tid = thread_create (fn_executable, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -54,6 +67,10 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  // Begin:: variables for storing arguments in the stack
+  
+  //end:: variables for storing arguments int he stack
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -66,6 +83,12 @@ start_process (void *file_name_)
   if (!success) 
     thread_exit ();
 
+
+  hex_dump(if_.esp,if_.esp,PHYS_BASE-if_.esp, true);
+  // Begin::setting up the stack for argument passing::our code
+  void get_stack_args(char *file_name, void **esp);
+  // End:: our code
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -76,6 +99,86 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
+
+  void get_stack_args(char *file_name, void **esp)
+  { 
+    char *save_ptr;
+    char *tocken = file_name;
+    void *stack_pointer = esp;
+    int argc = 0;
+    int total_length = 0;
+    //char *argv[30];
+    //split and insert into the stack
+    ///bin/ls -1 foo bar
+    // /bin/ls
+    // -1
+    // foo
+    // bar
+    ///tocken = strtok_r(file_name, " ", &save_ptr); // remove filename
+    while(tocken!= NULL)
+    {
+      int arg_length = (strlen(tocken) + 1);
+      total_length += arg_length;
+      stack_pointer -= arg_length;
+      memcpy(stack_pointer, tocken, arg_length);
+      argc++;
+      tocken = strtok_r(file_name, " ", &save_ptr);
+      printf('%s',tocken);
+    }
+
+    char *args_pointer = (char *) stack_pointer;
+
+    /*adding word align*/
+    
+    int word_align = 0;
+    while(total_length%4==0)
+    {
+      word_align++;
+      total_length++;
+    }
+    if(word_align != 0)
+    {
+      stack_pointer -=word_align;
+      memset(stack_pointer, 0, word_align);
+    }
+
+    /*adding null char*/
+    
+    stack_pointer -= sizeof(char*);
+    memset(stack_pointer, 0, 1);
+
+    /*adding argument address*/
+    
+    int args_pushed = 0;
+    while(argc > args_pushed)
+    {
+      stack_pointer -= sizeof(char *);
+      *((char **) stack_pointer) = args_pointer;
+      args_pushed++;
+      args_pointer += (strlen(args_pointer) + 1);
+    }
+
+    /*adding char ** */
+    
+    char ** first_fetch = (char **) stack_pointer;
+    stack_pointer -= sizeof(char **);
+    *((char ***) stack_pointer) = first_fetch;
+
+    /*adding number of arguments*/
+    
+    stack_pointer -= sizeof(int);
+    *(int *) (stack_pointer) = argc;
+
+    /*adding return address*/
+    
+    stack_pointer -= sizeof(int *);
+    *(int *) (stack_pointer) = 0;
+    *esp = stack_pointer;
+
+
+  }
+
+  
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -88,6 +191,9 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while(true){
+    thread_yield();
+  }
   return -1;
 }
 
@@ -195,7 +301,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (char *file_name, void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -208,6 +314,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
+  char *prog_name, *saveptr;
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -222,10 +329,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  prog_name = malloc(strlen(file_name)+1);
+  strlcpy (prog_name, file_name, PGSIZE);
+  prog_name= strtok_r(prog_name, " ", &saveptr);
+  file = filesys_open (prog_name);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", prog_name);
       goto done; 
     }
 
@@ -302,9 +412,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (file_name ,esp ))
     goto done;
 
+  get_stack_args(file_name,esp);
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -427,20 +538,43 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (char *file_name ,void **esp) 
 {
   uint8_t *kpage;
   bool success = false;
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+
+
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+        //argument passing--null *esp =  PHYS_BASE changed to *esp = PHYS_BASE - 12
+        *esp = PHYS_BASE - 12;
+        // end changes
       else
         palloc_free_page (kpage);
     }
+/*
+  *esp -= sizeof(char);
+  memset (*esp, '\0', sizeof(char));
+  *esp -= sizeof(char);
+  memset (*esp, '0', sizeof(char));
+  *esp -= sizeof(char);
+  memset (*esp, '5', sizeof(char));
+  *esp -= sizeof(char);
+  memset (*esp, '3', sizeof(char));
+  *esp -= sizeof(char);
+  memset (*esp, 'I', sizeof(char));
+  *esp -= sizeof(char);
+  memset (*esp, 'C', sizeof(char));
+  *esp -= sizeof(char);
+  memset (*esp, 'S', sizeof(char));
+  *esp -= sizeof(char);
+  hex_dump( (uintptr_t)*esp, *esp, sizeof(char) * 8, true);
+
+*/
   return success;
 }
 
