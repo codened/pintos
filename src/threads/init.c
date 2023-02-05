@@ -64,6 +64,8 @@ static char **read_command_line (void);
 static char **parse_options (char **argv);
 static void run_actions (char **argv);
 static void usage (void);
+char* read(void);
+int compare(char *word1, char *word2);
 
 #ifdef FILESYS
 static void locate_block_devices (void);
@@ -134,6 +136,56 @@ pintos_init (void)
     run_actions (argv);
   } else {
     // TODO: no command line passed to kernel. Run interactively 
+printf("---------------Hello!---------------\n");
+printf("---------Welcome to pintos!---------\n");
+char *whoami=malloc(sizeof(char)*7);
+whoami="whoami";
+char *shutdownword=malloc(sizeof(char)*8);
+shutdownword="shutdown";
+char *timeword=malloc(sizeof(char)*4);
+timeword="time";
+char *priorityword=malloc(sizeof(char)*8);
+priorityword="priority";
+char *threadword=malloc(sizeof(char)*6);
+threadword="thread";
+char *exitword=malloc(sizeof(char)*4);
+exitword="exit";
+char *ramword=malloc(sizeof(char)*3);
+ramword="ram";
+while(1){
+printf("CS2042>>");
+char* word=malloc(sizeof(char));
+word=(char*)read();
+printf("\n");
+if(compare(word,whoami)){
+  printf("%s\n","Dilshan Raveesh Rakshitha-200502U");
+}
+else if(compare(word,shutdownword)){
+  shutdown_power_off();
+}
+else if(compare(word,timeword)){
+  int temp2=(int)rtc_get_time();
+  printf("%d\n",temp2);
+}
+else if(compare(word,priorityword)){
+  int priority=thread_get_priority();
+  printf("%d\n",priority);
+}
+else if(compare(word,threadword)){
+  thread_print_stats();
+}
+else if(compare(word,exitword)){
+  printf("%s","exiting the QEMU emulater...Bye!");
+  break;
+}
+else if(compare(word,ramword)){
+  printf("%d kB RAM\n",init_ram_pages * PGSIZE / 1024);
+}
+else{
+  printf("%s: Command not found!\n",word);
+}
+  }
+	
   }
 
   /* Finish up. */
@@ -141,6 +193,48 @@ pintos_init (void)
   thread_exit ();
 }
 
+int compare(char *word1, char *word2){
+  int count=0;
+  while(1){
+    if(word1[count]==word2[count] && word1[count]==0x00){
+      return 1;
+    }
+    else if(word1[count]==word2[count]){
+      count+=1;
+    }
+    else{
+      return 0;
+    }
+  }
+}
+
+char * read(void){
+  char * word=(char *)malloc(sizeof(char)*100);
+
+  int count=0;
+  //printf("%s","correct upto here");
+  while(1){
+    //printf("%s","correct upto here");
+    char *temp=malloc(sizeof(char));
+    uint8_t temp1=input_getc();
+    *temp=temp1;
+    if(temp1==13){
+      word[count]=0x00;
+      break;
+    }
+    else if(temp1==8){
+      printf("%s","\b \b");
+      word[count]=0x00;
+      count-=1;
+    }
+    else{
+      printf("%c",*temp);
+      word[count]=*temp;
+      count+=1;
+    }
+  }
+  return word;
+}
 /* Clear the "BSS", a segment that should be initialized to
    zeros.  It isn't actually stored on disk or zeroed by the
    kernel loader, so we have to zero it ourselves.
